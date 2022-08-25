@@ -1,0 +1,229 @@
+policy: 1.0.0
+info:
+  title: customLogging
+  name: customlogging
+  version: 1.0.0
+  description: policy to demonstrate logging
+  contact: 
+    name: vasu
+    url: 'https://github.com/ibm-datapower/'
+    email: vasudevagudipati@pronteff.com
+attach:
+  - rest
+  - soap
+gateways:
+  - datapower-api-gateway
+properties:
+  $schema: "http://json-schema.org/draft-04/schema#"
+  type: object
+  properties:
+    LogPointID:
+      description: This field captures the position of the log captured in the transaction-flow.
+      enum:
+      - OrigRequest
+      - FinalResponse
+      - ErrorResponse
+      - ExtErrorResponse
+      - BackendRequest
+      - BackendResponse
+      lable: LogPointID
+      type: string
+    QMGR:
+      default: QMGR
+      description: Enter the QueueManager Name to send log messages.
+      lable: QMGR
+      type: string
+    TargetQueue:
+      default: QueueName
+      description: Enter the target MQ Request Queue name.
+      lable: TargetQueue
+      type: string
+    logLevel:
+      default: error
+      description: The desired level of logging. Note that the default datapower log
+        contains messages with > error severity.
+      enum:
+      - info
+      - notice
+      - warn
+      - error
+      - critical
+      - alert
+      - emerg
+      - log
+      - trace
+      label: logLevel
+      type: string
+
+    Logcontrol:
+      default: disabled
+      description: By enabling this feature, Payload will be logged. Default
+        is disabled.
+      enum:
+      - enabled
+      - disabled
+      lable: Logcontrol
+      type: string
+  required:
+  - logLevel
+  - Logcontrol
+  - LogPointID
+  - QMGR
+  - TargetQueue
+assembly:
+  execute:
+    - xslt:
+        version: 2.0.0
+        title: upd-customlogging-xslt
+        source: >-
+            <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:dp="http://www.datapower.com/extensions" xmlns:apigw="http://www.ibm.com/xmlns/datapower/2017/11/apigateway" extension-element-prefixes="dp apigw">
+                <xsl:template match="/">
+                <!-- setting context variables values to be used for gateway script--> 
+                    <xsl:variable name="gwyid">
+                        <xsl:value-of select="dp:variable('var://service/system/ident')/identification/device-name/text()"/>
+                    </xsl:variable>
+                    <xsl:variable name="elapsedtime">
+                        <xsl:value-of select="dp:variable('var://service/time-elapsed')"/>
+                    </xsl:variable>               
+                    <dp:set-variable name="'var://context/udpservice/gwyid'" value="$gwyid"/>
+                    <dp:set-variable name="'var://context/udpservice/etime'" value="$elapsedtime"/>
+                </xsl:template>
+            </xsl:stylesheet>
+    - gatewayscript:
+        version: 2.0.0
+        title: customlogging
+        source: |-
+            var apim = require('apim');
+            var urlopen = require('urlopen');
+            apim.readInputAsBuffer(function (error, buffer) {
+                if (error) {
+                    console.error("error");
+                } else {
+                //read customlog user defined policy properties
+                    var logging = context.get("local.parameter.Logcontrol");
+                    var LogPointID = context.get("local.parameter.LogPointID");
+                    var QMGR = context.get("local.parameter.QMGR");
+                    var TargetQueue = context.get("local.parameter.TargetQueue");
+                    var Level = context.get("local.parameter.logLevel");
+                 //if logControl is enabled
+                    if(logging == 'enabled'){
+                    let date_ob = new Date();
+                    var Timestamp=  date_ob.getFullYear() + ("0" + (date_ob.getMonth() + 1)).slice(-2) + ("0" + date_ob.getDate()).slice(-2) + ("0" + date_ob.getHours() ).slice(-2) + ("0" + date_ob.getMinutes()).slice(-2) + ("0" + date_ob.getSeconds()).slice(-2)+("0" + date_ob.getMilliseconds()).slice(-3);                         
+                    var GlobalTranID = apim.getContext('session.globalTransactionID');
+                    var GwyTranID = apim.getContext('session.transactionID');
+                    var LogSource = 'APICGwy';
+                    var APIName = apim.getvariable('api.name');
+                    var APIVersion = apim.getvariable('api.version');
+                    var StatusCode = apim.getvariable('message.status.code');
+                    var StatusDesc = apim.getvariable('message.status.reason');
+                    var DevOrgName = apim.getContext('client.org.name');
+                    var ClientAppName = apim.getContext('client.app.name');
+                    var OperationID = apim.getContext('api.operation.id');
+                    var Catalog = apim.getContext('env.path');
+                    var InURL = apim.getContext('request.uri');
+                    //var OutURL = apim.getvariable('message.headers.OutURL');
+                    var OutURL = apim.getvariable('api.properties.target-url');
+                    var ForwardIP = apim.getContext('message.headers.X-Forwarded-for');
+                    var ClientIP = apim.getContext('message.headers.X-Client-IP');
+                    var gwyidval = session.name('udpservice').getVar('gwyid');
+                    var GwyID = gwyidval.slice(38);
+                    var TranDurationval = session.name('udpservice').getVar('etime');
+                    var TranDuration = TranDurationval.slice(38);
+                    var OrigRequestPayload = "";
+                    var FinalResponsePayload = "";
+                    var HTTPRequestHeader = "";
+                    var HTTPResponseHeader = "";
+                    var UserAgent = "";
+                    var ContentType = "";
+                    var paylodbody="";
+                    var Host = "";
+                    var QueryParam = "";                   
+                    if(LogPointID == 'OrigRequest'){
+                    console.error("original content type:::"+apim.getContext('message.headers.Content-Type'));
+                    HTTPRequestHeader = apim.getvariable('message.original.headers');                    
+                      UserAgent = apim.getContext('message.original.headers.User-Agent');
+                      ContentType = apim.getContext('message.original.headers.Content-Type');
+                      Host = apim.getContext('message.original.headers.Host');
+                      QueryParam = apim.getvariable('request.querystring');
+                      OrigRequestPayload = buffer.toString();
+                      console.error("original response payload:::"+OrigRequestPayload);
+                    }
+                    else if(LogPointID == 'FinalResponse'){
+                    console.error("response content type:::"+apim.getContext('Final.headers.Content-Type'));
+                     var HTTPResponseHeader = apim.getvariable('Final.headers');
+                      UserAgent = apim.getContext('message.original.headers.User-Agent');
+                      ContentType = apim.getContext('message.original.headers.Content-Type');
+                      Host = apim.getContext('message.original.headers.Host');
+                      StatusCode = apim.getvariable('Final.status.code');
+                      StatusDesc = apim.getvariable('Final.status.reason');
+                       var jsondata = JSON.stringify(apim.getvariable('Final'));
+                       var backendpayload= JSON.parse(jsondata);
+                       paylodbody = backendpayload.body.data;
+                       var bufpay = new Buffer(paylodbody);
+                       FinalResponsePayload =bufpay.toString();
+                       console.error("final response payload:::"+FinalResponsePayload);
+                    }
+                    //framing JSON Request from the values                    
+                    var MetaData = {
+                        Level,
+                        Timestamp,
+                        LogPointID,
+                        GlobalTranID,
+                        TranDuration,
+                        GwyTranID,
+                        LogSource,
+                        APIName,
+                        APIVersion,
+                        StatusCode,
+                        StatusDesc                    
+                    };
+                    var APIC = {
+                        DevOrgName,
+                        ClientAppName,
+                        GwyID,
+                        OperationID,
+                        Catalog,
+                        InURL,
+                        OutURL,
+                    };
+                    var Misc = {
+                        ClientIP,
+                        ForwardIP			
+                    };
+                    var LogMessage = {
+                        MetaData,
+                        APIC,
+                        QueryParam,
+                        OrigRequestPayload,
+                        FinalResponsePayload,
+                        HTTPRequestHeader,
+                        HTTPResponseHeader,
+                        Misc
+                    };
+                    var LogMessagedata = {
+                    LogMessage
+                    };
+                    var target = 'dpmq://' + QMGR + '?RequestQueue=' + TargetQueue;
+                    var method = 'post';
+                    var headers = {
+                        "MQMP": 'MQMP'
+                    };
+                    var data = LogMessagedata;
+                    var options = {
+                        target,
+                        method,
+                        headers,
+                        data
+                    };
+                    // putting the json message in the Queue
+                    urlopen.open(options, function (Err, Resp) {
+                        if (Err) {
+                            throw new Err("URL open error." + JSON.stringify(Err));
+                        } else {
+                            console.error("message succesfully put in Queue");
+                        }
+                    });
+                    }
+                }
+                
+            });
